@@ -1,0 +1,91 @@
+# ─────────────────────────────────────────────────────
+#  SkillSwap Marketplace — Full Stack Docker Compose
+# ─────────────────────────────────────────────────────
+version: '3.9'
+
+services:
+
+  # ── MongoDB ──────────────────────────────────────────
+  mongo:
+    image: mongo:7
+    container_name: skillswap-mongo
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - skillswap-net
+
+  # ── Redis ─────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: skillswap-redis
+    ports:
+      - '6379:6379'
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - skillswap-net
+
+  # ── Backend API ──────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      target: runner
+    container_name: skillswap-backend
+    ports:
+      - '5000:5000'
+    env_file:
+      - ./backend/.env
+    environment:
+      - NODE_ENV=production
+      - MONGO_URI=mongodb://mongo:27017/skill-exchange
+      - REDIS_HOST=redis
+      - BULL_REDIS_HOST=redis
+      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID}
+      - RAZORPAY_SECRET=${RAZORPAY_SECRET}
+      - RAZORPAY_WEBHOOK_SECRET=${RAZORPAY_WEBHOOK_SECRET}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/logs:/app/logs
+      - ./backend/uploads:/app/uploads
+    restart: unless-stopped
+    networks:
+      - skillswap-net
+
+  # ── Frontend (Vite preview / nginx serve) ────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+    container_name: skillswap-frontend
+    ports:
+      - '3000:80'
+    depends_on:
+      - backend
+    networks:
+      - skillswap-net
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  redis_data:
+
+networks:
+  skillswap-net:
+    driver: bridge
